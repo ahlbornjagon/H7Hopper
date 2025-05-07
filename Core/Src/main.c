@@ -19,6 +19,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "memorymap.h"
 #include "rtc.h"
 #include "spi.h"
 #include "tim.h"
@@ -48,7 +49,7 @@
 /* USER CODE BEGIN PV */
 
 uint16_t foxX = 20;        // Fixed X position for fox
-uint16_t foxY =75;        // Y position (ground position)
+uint16_t foxY =65;        // Y position (ground position)
 int8_t foxVelocityY = 0;   // Vertical velocity (for jumping)
 uint8_t isJumping = 0;     // Jump state
 uint16_t groundLevel = 75; // Ground level position
@@ -58,6 +59,13 @@ uint16_t bgOffset = 0;     // Background scroll offset
 uint8_t treePositions[5] = {20, 60, 100, 150, 200}; // X positions of trees
 uint8_t scrollSpeed = 2;   // Pixels per frame to scroll
 uint32_t lastUpdateTime = 0; // For timing control
+
+#define MAX_VISIBLE_OBSTACLES 20  // Increased buffer size
+uint16_t obstaclePosX[MAX_VISIBLE_OBSTACLES]; // X positions of obstacles
+uint8_t obstacleActive[MAX_VISIBLE_OBSTACLES]; // Whether each obstacle is active
+uint32_t lastObstacleTime = 0; // Time when last obstacle was spawned
+uint32_t obstacleInterval = 1500; // Spawn interval in milliseconds (1.5 seconds)
+uint8_t nextObstacleIndex = 0; // Index for circular buffer
 
 /* USER CODE END PV */
 
@@ -148,6 +156,7 @@ static void RTC_CalendarShow(RTC_DateTypeDef *sdatestructureget,RTC_TimeTypeDef 
   */
 int main(void)
 {
+
   /* USER CODE BEGIN 1 */
 
   #ifdef W25Qxx
@@ -183,35 +192,28 @@ int main(void)
 //	HAL_TIMEx_PWMN_Start(&htim1,TIM_CHANNEL_2);
 //	__HAL_TIM_SetCompare(&htim1,TIM_CHANNEL_2,10);
 	LCD_Test();
+  InitScene();
+  InitObstacles();
+    
+  bgOffset = 0;
+  scrollSpeed = 2; // Ensure this is not zero
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-	uint8_t text[20];
-	RTC_DateTypeDef sdatestructureget;
-	RTC_TimeTypeDef stimestructureget;
-  foxVelocityY = -8;
-    
-  // Initial drawing
-  ST7735_LCD_Driver.FillRect(&st7735_pObj, 0, 0, ST7735Ctx.Width, ST7735Ctx.Height, BLUE);
-  ST7735_LCD_Driver.DrawHLine(&st7735_pObj, 0, groundLevel, ST7735Ctx.Width, WHITE);
-  InitScene();
-    
-  // Force the background to start moving immediately
-  bgOffset = 0;
-  scrollSpeed = 2; // Ensure this is not zero
-  while (1) {
-    // Update fox physics
+  while (1)
+  {
+    /* USER CODE END WHILE */
+
+    /* USER CODE BEGIN 3 */
     UpdatePhysics();
-    
+        
     // Force update background (ensure it's moving)
     ForceUpdateBackground();
+    UpdateObstacles(); // Update obstacles
     
     // Update scene with new positions
     UpdateScene();
-    
-    // Control frame rate
-    HAL_Delay(30); // Try a different delay value
   }
   /* USER CODE END 3 */
 }
@@ -228,15 +230,18 @@ void SystemClock_Config(void)
   /** Supply configuration update enable
   */
   HAL_PWREx_ConfigSupply(PWR_LDO_SUPPLY);
+
   /** Configure the main internal regulator output voltage
   */
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE0);
 
   while(!__HAL_PWR_GET_FLAG(PWR_FLAG_VOSRDY)) {}
+
   /** Configure LSE Drive Capability
   */
   HAL_PWR_EnableBkUpAccess();
   __HAL_RCC_LSEDRIVE_CONFIG(RCC_LSEDRIVE_LOW);
+
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
@@ -257,6 +262,7 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+
   /** Initializes the CPU, AHB and APB buses clocks
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
@@ -277,34 +283,27 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
-
-/* USER CODE END 4 */
-
-/**
-  * @brief  This function is executed in case of error occurrence.
-  * @retval None
-  */
-void Error_Handler(void)
-{
-  /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
-  LED_Blink(500,500);
-  /* USER CODE END Error_Handler_Debug */
-}
-
-
-// Draw the fox at its current position
 void DrawFox(uint16_t x, uint16_t y) {
-  // Your existing fox drawing code
+  // Main body
   ST7735_LCD_Driver.FillRect(&st7735_pObj, x, y, 16, 10, BROWN);
+  
+  // Head
   ST7735_LCD_Driver.FillRect(&st7735_pObj, x + 10, y - 6, 10, 10, BROWN);
+  
+  // Eyes
   ST7735_LCD_Driver.FillRect(&st7735_pObj, x + 14, y - 4, 2, 2, WHITE);
   ST7735_LCD_Driver.FillRect(&st7735_pObj, x + 18, y - 4, 2, 2, WHITE);
+  
+  // Ears
   ST7735_LCD_Driver.FillRect(&st7735_pObj, x + 10, y - 10, 3, 4, BROWN);
   ST7735_LCD_Driver.FillRect(&st7735_pObj, x + 17, y - 10, 3, 4, BROWN);
+  
+  // Tail
+  ST7735_LCD_Driver.FillRect(&st7735_pObj, x - 5, y + 2, 5, 4, BROWN);
+  
+  // Legs (attached to body's current position)
   ST7735_LCD_Driver.FillRect(&st7735_pObj, x + 2, y + 10, 2, 5, BROWN);
   ST7735_LCD_Driver.FillRect(&st7735_pObj, x + 12, y + 10, 2, 5, BROWN);
-  ST7735_LCD_Driver.FillRect(&st7735_pObj, x - 5, y + 2, 5, 4, BROWN);
 }
 
 void DrawTree(uint16_t x, uint16_t y) {
@@ -366,36 +365,30 @@ void ForceUpdateBackground(void) {
 }
 
 void UpdateScene(void) {
-  static uint16_t oldFoxY = 50; // Track previous fox position
-  static uint16_t oldBgOffset = 0; // Track previous background offset
   uint8_t i;
   
-  // Only redraw sky area if background or fox moved
-  if (oldBgOffset != bgOffset || oldFoxY != foxY) {
-      // Clear only the sky area
-      ST7735_LCD_Driver.FillRect(&st7735_pObj, 0, 0, ST7735Ctx.Width, groundLevel, LIGHTBLUE);
-      
-      // Draw trees in their new positions
-      for (i = 0; i < 5; i++) {
-          // Calculate actual X position with scroll offset
-          int16_t treeX = (treePositions[i] - bgOffset) % ST7735Ctx.Width;
-          
-          // Handle negative wrap-around
-          if (treeX < 0) {
-              treeX += ST7735Ctx.Width;
-          }
-          
-          // Draw tree at calculated position
-          DrawTree(treeX, groundLevel);
-      }
-      
-      // Draw fox at its new position
-      DrawFox(foxX, foxY);
-      
-      // Save current positions for next comparison
-      oldFoxY = foxY;
-      oldBgOffset = bgOffset;
+  // Always clear the entire sky area
+  ST7735_LCD_Driver.FillRect(&st7735_pObj, 0, 0, ST7735Ctx.Width, groundLevel, LIGHTBLUE);
+  
+  // Draw trees in their new positions
+  for (i = 0; i < 5; i++) {
+    int16_t treeX = (treePositions[i] - bgOffset) % ST7735Ctx.Width;
+    if (treeX < 0) {
+      treeX += ST7735Ctx.Width;
+    }
+    DrawTree(treeX, groundLevel);
   }
+  
+  // Redraw the ground
+  ST7735_LCD_Driver.FillRect(&st7735_pObj, 0, groundLevel, ST7735Ctx.Width, 
+                           ST7735Ctx.Height - groundLevel, GREEN);
+  ST7735_LCD_Driver.DrawHLine(&st7735_pObj, 0, groundLevel, ST7735Ctx.Width, BROWN);
+  
+  // Draw obstacles
+  DrawObstacles();
+  
+  // Draw fox with current position
+  DrawFox(foxX, foxY);
 }
 
 // Check input and start jump if needed
@@ -421,6 +414,12 @@ void InitScene(void) {
 
 // Update fox position based on physics
 void UpdatePhysics(void) {
+  // Check if KEY button is pressed and fox is not already jumping
+  if (HAL_GPIO_ReadPin(KEY_GPIO_Port, KEY_Pin) == GPIO_PIN_SET && !isJumping) {
+      isJumping = 1;
+      foxVelocityY = -8; // Negative velocity for upward movement
+  }
+  
   // Only update if fox is jumping
   if (isJumping) {
       // Update position based on velocity
@@ -430,19 +429,102 @@ void UpdatePhysics(void) {
       foxVelocityY += 1;
       
       // Check if back on ground
-      if (foxY >= 50) {
-          foxY = 50;          // Reset to ground position
+      if (foxY >= 65) {
+          foxY = 65;          // Reset to ground position
           foxVelocityY = 0;   // Stop vertical movement
           isJumping = 0;      // No longer jumping
       }
   }
+}
+
+void DrawBush(uint16_t x, uint16_t y) {
+  // Bush base - positioned to be on ground level with height aligned with fox
+  ST7735_LCD_Driver.FillRect(&st7735_pObj, x, y - 5, 16, 15, BRRED);
   
-  // Check if KEY button is pressed and fox is not already jumping
-  if (HAL_GPIO_ReadPin(KEY_GPIO_Port, KEY_Pin) == GPIO_PIN_SET && !isJumping) {
-      isJumping = 1;
-      foxVelocityY = -8; // Negative velocity for upward movement
+  // Bush top (rounded effect with smaller rectangles)
+  ST7735_LCD_Driver.FillRect(&st7735_pObj, x + 2, y - 9, 12, 4, GREEN);
+  ST7735_LCD_Driver.FillRect(&st7735_pObj, x + 4, y - 11, 8, 2, GREEN);
+  
+  // Bush details
+  ST7735_LCD_Driver.FillRect(&st7735_pObj, x + 7, y - 13, 2, 2, RED); // A little flower/berry
+}
+
+// Initialize obstacle system
+void InitObstacles() {
+  for (int i = 0; i < MAX_VISIBLE_OBSTACLES; i++) {
+    obstacleActive[i] = 0;
+    obstaclePosX[i] = 0;
+  }
+  nextObstacleIndex = 0;
+  lastObstacleTime = HAL_GetTick();
+}
+
+// Update and manage obstacles
+void UpdateObstacles() {
+  uint32_t currentTime = HAL_GetTick();
+  
+  // Spawn new obstacle every obstacleInterval milliseconds
+  if (currentTime - lastObstacleTime > obstacleInterval) {
+    // Always create a new obstacle using circular buffer
+    obstacleActive[nextObstacleIndex] = 1;
+    obstaclePosX[nextObstacleIndex] = ST7735Ctx.Width; // Start from right edge
+    
+    // Move to next buffer position (circular)
+    nextObstacleIndex = (nextObstacleIndex + 1) % MAX_VISIBLE_OBSTACLES;
+    
+    // Update spawn timer
+    lastObstacleTime = currentTime;
+  }
+  
+  // Update obstacle positions and check collisions
+  for (int i = 0; i < MAX_VISIBLE_OBSTACLES; i++) {
+    if (obstacleActive[i]) {
+      // Move obstacle to the left
+      obstaclePosX[i] -= scrollSpeed;
+      
+      // Check if obstacle is off screen
+      if (obstaclePosX[i] < -20) {
+        obstacleActive[i] = 0; // Deactivate
+      }
+      
+      // Check collision with fox
+      if (obstaclePosX[i] > foxX - 15 && obstaclePosX[i] < foxX + 20) {
+        // Vertical collision check - if fox is not jumping high enough
+        if (foxY > groundLevel - 20) {
+          // Collision detected!
+          // gameOver = 1; // Uncomment this to implement game over
+        }
+      }
+    }
   }
 }
+
+// Draw all active obstacles
+void DrawObstacles() {
+  for (int i = 0; i < MAX_VISIBLE_OBSTACLES; i++) {
+    if (obstacleActive[i]) {
+      DrawBush(obstaclePosX[i], groundLevel);
+    }
+  }
+}
+
+
+
+
+/* USER CODE END 4 */
+
+/**
+  * @brief  This function is executed in case of error occurrence.
+  * @retval None
+  */
+void Error_Handler(void)
+{
+  /* USER CODE BEGIN Error_Handler_Debug */
+  /* User can add his own implementation to report the HAL error return state */
+  LED_Blink(500,500);
+  /* USER CODE END Error_Handler_Debug */
+}
+
 #ifdef  USE_FULL_ASSERT
 /**
   * @brief  Reports the name of the source file and the source line number
@@ -459,5 +541,3 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
-
-/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
